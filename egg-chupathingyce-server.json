@@ -1,0 +1,232 @@
+{
+    "_comment": "DO NOT EDIT: FILE GENERATED AUTOMATICALLY BY PTERODACTYL PANEL - PTERODACTYL.IO",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": "https://raw.githubusercontent.com/JizzyRivers/chupathingyce-pterodactyl-egg/main/egg-chupathingyce-server.json"
+    },
+    "exported_at": "2026-10-17T00:00:00+00:00",
+    "name": "ChupathingyCE Dedicated Server",
+    "author": "29721813+JizzyRivers@users.noreply.github.com",
+    "description": "Halo: Combat Evolved dedicated server from ChupathingyCE. Hosts games around the clock from a playlist, listed on halo.milenko.org and in the ChupathingyCE/OpenCE Server Browser. Internet play uses the primary allocation (UDP). You supply the game's maps.",
+    "features": null,
+    "docker_images": {
+        "Alpine": "ghcr.io/pterodactyl/yolks:alpine"
+    },
+    "file_denylist": [],
+    "startup": "ash ./start.sh",
+    "config": {
+        "files": "{}",
+        "startup": "{\"done\": \"dedicated: the playlist is\"}",
+        "logs": "{}",
+        "stop": "^C"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/ash\n# ChupathingyCE Dedicated Server installer (runs in ghcr.io/pterodactyl/installers:alpine)\nset -eu\n\napk add --no-cache curl unzip jq ca-certificates >/dev/null\n\nREPO=ChupathingyCE/chupathingyce\ncd /mnt/server\n\n# Which server: the node's architecture unless the variable says otherwise.\nARCH=\"${SERVER_ARCH:-auto}\"\nif [ \"$ARCH\" = auto ]; then\n\tcase \"$(uname -m)\" in\n\t\tx86_64) ARCH=x64 ;;\n\t\taarch64|arm64) ARCH=arm64 ;;\n\t\ti?86) ARCH=x86 ;;\n\t\t*) echo \"unsupported architecture $(uname -m)\"; exit 1 ;;\n\tesac\nfi\n\nif [ -z \"${VERSION:-}\" ] || [ \"$VERSION\" = latest ]; then\n\tTAG=$(curl -fsSL \"https://api.github.com/repos/$REPO/releases/latest\" | jq -r .tag_name)\nelse\n\tTAG=\"$VERSION\"\nfi\n[ -n \"$TAG\" ] && [ \"$TAG\" != null ] || { echo \"could not find the release\"; exit 1; }\n\nZIP=\"chupathingyce-server-linux-$ARCH.zip\"\nBASE=\"https://github.com/$REPO/releases/download/$TAG\"\necho \"Installing $ZIP from $TAG\"\n\n# Downloads go in the server folder: the install container's /tmp is a small\n# tmpfs (Wings' tmpfs_size, 100 MB by default), too small for a maps archive.\nTMP=/mnt/server/.egg-tmp\nrm -rf \"$TMP\" && mkdir -p \"$TMP\"\ntrap 'rm -rf \"$TMP\"' EXIT\ncurl -fsSL -o \"$TMP/$ZIP\" \"$BASE/$ZIP\"\ncurl -fsSL -o \"$TMP/SHA256SUMS\" \"$BASE/SHA256SUMS\"\n(cd \"$TMP\" && grep \"  $ZIP\\$\" SHA256SUMS | sha256sum -c -)\nunzip -o -q \"$TMP/$ZIP\" -d \"$TMP/x\"\n\ninstall -m 755 \"$TMP/x/chupathingyce-server\" ./chupathingyce-server\ncat > start.sh <<'EOF'\n#!/bin/ash\n# ChupathingyCE Dedicated Server launcher for Pterodactyl.\n# The egg's installer writes this file; reinstalling the server rewrites it.\ncd /home/container || exit 1\n\n# The data folder is the server's home; saves, cache and logs inside it so\n# they're in backups and visible over SFTP.\nexport HALO_DATA_ROOT=/home/container\nexport HALO_SAVE_ROOT=/home/container/saves\nexport HALO_CACHE_ROOT=/home/container/cache\nexport XDG_RUNTIME_DIR=/tmp\n\n# Internet play on the server's primary allocation (UDP). Docker publishes it,\n# so the server is reachable the same way as a port-forwarded home server.\nexport HALO_NET_TUNNEL_PORT=\"${SERVER_PORT}\"\nexport HALO_NET_ALLOW_UPNP=false\n\n# Pterodactyl's console feeds stdin; read it even if it isn't a terminal.\nexport HALO_DEDICATED_CONSOLE=true\n\n# The control panel, on a second allocation, when one is given.\nif [ -n \"${CONTROL_PORT:-}\" ]; then\n\texport HALO_DEDICATED_CONTROL=\"0.0.0.0:${CONTROL_PORT}\"\nfi\n\n# Blank panel variables mean \"the server's default, or what sv_set / the\n# control panel saved in admin/settings.toml\": drop them from the environment\n# so they don't override that file.\nfor v in $(env | sed -n 's/^\\(HALO_[A-Z0-9_]*\\)=$/\\1/p'); do\n\tunset \"$v\"\ndone\n\nif [ ! -f maps/ui.map ]; then\n\techo \"[egg] maps/ui.map is missing: upload ui.map and the multiplayer maps\"\n\techo \"[egg] to the maps/ folder over SFTP (see the egg's notes), then start again.\"\n\texit 1\nfi\n\nexec ./chupathingyce-server\nEOF\nchmod 755 start.sh\nmkdir -p maps maps_ce maps_md maps_pc playlists saves cache logs licenses\n# The release's playlists and name list are refreshed on every reinstall;\n# keep your own playlists under other names (or make them in the control\n# panel, which saves them in admin/).\ncp -f \"$TMP\"/x/playlists/*.txt playlists/\ncp -f \"$TMP/x/blocked_names.txt\" ./blocked_names.txt\ncp -f \"$TMP/x/README.md\" ./SERVER_README.md\ncp -f \"$TMP\"/x/*LICENSE* \"$TMP\"/x/*COPYING* \"$TMP\"/x/*OFL* \"$TMP\"/x/*CC0* licenses/ 2>/dev/null || true\n\n# Optional: your own archive of the game's maps (zip or tar.gz, holding maps/\n# and any of maps_ce/, maps_md/, maps_pc/ at its top). Fetched only while\n# maps/ui.map is missing, so a reinstall doesn't download it again.\nif [ -n \"${MAPS_URL:-}\" ] && [ ! -f maps/ui.map ]; then\n\techo \"Fetching maps from MAPS_URL\"\n\tif curl -fsSL -o \"$TMP/maps.archive\" \"$MAPS_URL\"; then\n\t\tif unzip -tq \"$TMP/maps.archive\" >/dev/null 2>&1; then\n\t\t\tunzip -o -q \"$TMP/maps.archive\" -d /mnt/server || echo \"warning: could not unpack the maps archive\"\n\t\telse\n\t\t\ttar -xzf \"$TMP/maps.archive\" -C /mnt/server || echo \"warning: could not unpack the maps archive\"\n\t\tfi\n\t\trm -f \"$TMP/maps.archive\"\n\telse\n\t\techo \"warning: could not download MAPS_URL; upload the maps over SFTP instead\"\n\tfi\n\t[ -f maps/ui.map ] || echo \"warning: still no maps/ui.map\"\nfi\n\necho \"$TAG ($ARCH)\" > .egg-version\necho \"Installed ChupathingyCE server $TAG ($ARCH).\"\n[ -f maps/ui.map ] || echo \"Next: upload ui.map and the multiplayer maps to maps/ over SFTP.\"\n",
+            "container": "ghcr.io/pterodactyl/installers:alpine",
+            "entrypoint": "ash"
+        }
+    },
+    "variables": [
+        {
+            "name": "Server name",
+            "description": "The name on halo.milenko.org and the Server Browser. 15 characters at most.",
+            "env_variable": "HALO_DEDICATED_NAME",
+            "default_value": "My Server",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|max:15",
+            "field_type": "text"
+        },
+        {
+            "name": "Playlist",
+            "description": "A playlist inside the server folder: playlists/free_for_all.txt, slayer.txt, team_slayer.txt, small_maps.txt, big_maps.txt, bloodgulch.txt, gearbox.txt, or your own.",
+            "env_variable": "HALO_DEDICATED",
+            "default_value": "playlists/free_for_all.txt",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|max:128|regex:/^[A-Za-z0-9_][A-Za-z0-9_.\\/-]*\\.txt$/",
+            "field_type": "text"
+        },
+        {
+            "name": "Maximum players",
+            "description": "Players a game takes (server default 12). Blank: the server's default, or what the control panel / sv_set saved.",
+            "env_variable": "HALO_DEDICATED_MAXIMUM_PLAYERS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|integer|between:1,128",
+            "field_type": "text"
+        },
+        {
+            "name": "Minimum players",
+            "description": "Players a game waits for before its countdown (server default 1). Blank: the server's default, or what the control panel / sv_set saved.",
+            "env_variable": "HALO_DEDICATED_MINIMUM_PLAYERS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|integer|between:1,128",
+            "field_type": "text"
+        },
+        {
+            "name": "Idle limit (minutes)",
+            "description": "End a game nobody has scored in for this long; 0 never (server default 5). Blank: the server's default, or what the control panel / sv_set saved.",
+            "env_variable": "HALO_DEDICATED_IDLE_LIMIT",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|integer|between:0,1440",
+            "field_type": "text"
+        },
+        {
+            "name": "Public",
+            "description": "true: listed in the in-game Server Browser. false: only the game list and invite links.",
+            "env_variable": "HALO_DEDICATED_PUBLIC",
+            "default_value": "true",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Welcome message",
+            "description": "Chat message ChupathingyCE players get as they join (printable ASCII). Blank: the server's default, or what the control panel / sv_set saved.",
+            "env_variable": "HALO_DEDICATED_WELCOME",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:127|regex:/^[\\x20-\\x7E]*$/",
+            "field_type": "text"
+        },
+        {
+            "name": "Post-game seconds",
+            "description": "How long the carnage report shows (server default 20). Blank: the server's default, or what the control panel / sv_set saved.",
+            "env_variable": "HALO_DEDICATED_POSTGAME_SECONDS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|integer|between:0,300",
+            "field_type": "text"
+        },
+        {
+            "name": "Skip lobby",
+            "description": "true: start the next game at once when enough players stayed. Blank: the server's default, or what the control panel / sv_set saved.",
+            "env_variable": "HALO_DEDICATED_SKIP_LOBBY",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Name filter",
+            "description": "true: warn and kick players with a name in blocked_names.txt. Blank: the server's default, or what the control panel / sv_set saved.",
+            "env_variable": "HALO_DEDICATED_NAME_FILTER",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Chat",
+            "description": "2 on, 1 team chat only, 0 off. Blank: the server's default, or what the control panel / sv_set saved.",
+            "env_variable": "HALO_DEDICATED_CHAT",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|integer|in:0,1,2",
+            "field_type": "text"
+        },
+        {
+            "name": "Startup commands file",
+            "description": "A file in the server folder with one console command a line, run once the server hosts (e.g. startup.txt).",
+            "env_variable": "HALO_DEDICATED_COMMANDS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:128|regex:/^[A-Za-z0-9_][A-Za-z0-9_.\\/-]*$/",
+            "field_type": "text"
+        },
+        {
+            "name": "Control panel port",
+            "description": "Turns on the web control panel / API on this port. It must be one of this server's allocations (add a second one). HTTPS with the server's own certificate: check the fingerprint the console prints. Blank: off.",
+            "env_variable": "CONTROL_PORT",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "nullable|integer|between:1024,65535",
+            "field_type": "text"
+        },
+        {
+            "name": "Control panel TLS",
+            "description": "auto/on: HTTPS (required on a public address).",
+            "env_variable": "HALO_DEDICATED_CONTROL_TLS",
+            "default_value": "auto",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "required|string|in:auto,on",
+            "field_type": "text"
+        },
+        {
+            "name": "List on halo.milenko.org",
+            "description": "false: not on the game list (invites and the Server Browser still work).",
+            "env_variable": "HALO_NET_LIST_GAMES",
+            "default_value": "true",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Delta Stats",
+            "description": "Send each game's events (kills, positions, medals...) to halo.milenko.org for match pages and leaderboards. Player names only, never addresses.",
+            "env_variable": "HALO_NET_REPORT_EVENTS",
+            "default_value": "true",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Events token",
+            "description": "A token from the game list's operator: games count as a trusted server's.",
+            "env_variable": "HALO_EVENTS_TOKEN",
+            "default_value": "",
+            "user_viewable": false,
+            "user_editable": false,
+            "rules": "nullable|string|max:256",
+            "field_type": "text"
+        },
+        {
+            "name": "Server build",
+            "description": "auto: the node's architecture. x86 (32-bit) runs on x64 nodes too and uses less memory, but is meant for Xbox maps; use x64/arm64 for Custom Edition and HaloMD maps. Reinstall to apply.",
+            "env_variable": "SERVER_ARCH",
+            "default_value": "auto",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "required|string|in:auto,x64,arm64,x86",
+            "field_type": "text"
+        },
+        {
+            "name": "Version",
+            "description": "A release tag (v0.7.5d) or latest. Reinstall to update.",
+            "env_variable": "VERSION",
+            "default_value": "latest",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "required|string|max:32|regex:/^[A-Za-z0-9][A-Za-z0-9.-]*$/",
+            "field_type": "text"
+        },
+        {
+            "name": "Maps archive URL",
+            "description": "Optional: a zip or tar.gz of YOUR OWN copy of the maps (maps/ui.map etc. at its top), fetched at install while maps/ui.map is missing. Otherwise upload over SFTP.",
+            "env_variable": "MAPS_URL",
+            "default_value": "",
+            "user_viewable": false,
+            "user_editable": false,
+            "rules": "nullable|url|max:512",
+            "field_type": "text"
+        }
+    ]
+}
