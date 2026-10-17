@@ -81,6 +81,12 @@ variables = [
         "Optional: a zip or tar.gz of YOUR OWN copy of the maps (maps/ui.map etc. at its top), "
         "fetched at install while maps/ui.map is missing. Otherwise upload over SFTP.",
         editable=False, viewable=False),
+    var("Custom Edition maps", "CE_MAPS", "",
+        "nullable|string|max:512|regex:/^[A-Za-z0-9_][A-Za-z0-9_, ]*$/",
+        "Optional: Custom Edition maps to fetch into maps_ce/ from the community map repository "
+        "(maps.halonet.net), the copies players download when they join, e.g. new_mombasa_classic. "
+        "Commas between names. Play them as <name>@ce in a playlist. Reinstall to apply.",
+        editable=False),
 ]
 
 egg = {

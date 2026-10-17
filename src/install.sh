@@ -71,6 +71,43 @@ if [ -n "${MAPS_URL:-}" ] && [ ! -f maps/ui.map ]; then
 	[ -f maps/ui.map ] || echo "warning: still no maps/ui.map"
 fi
 
+# Optional: Custom Edition maps from the community map repository
+# (maps.halonet.net, then its mirrors), the same copies ChupathingyCE players
+# download when they join a game on a map they don't have. A player's download
+# must be the host's version of the map, so the server plays the repository's
+# copy. Fetched only while maps_ce/<name>.map is missing.
+if [ -n "${CE_MAPS:-}" ]; then
+	[ "$ARCH" = x86 ] && echo "warning: the x86 server can't play Custom Edition maps; use x64 or arm64"
+	for m in $(echo "$CE_MAPS" | tr 'A-Z,' 'a-z '); do
+		if [ -f "maps_ce/$m.map" ]; then
+			echo "maps_ce/$m.map is already there"
+			continue
+		fi
+		got=
+		for r in https://maps.halonet.net https://maps2.halonet.net https://maps1.halonet.net; do
+			if curl -fsSL -o "$TMP/$m.zip" "$r/halonet/locator.php?format=zip&map=$m&type=halom"; then
+				got=$r
+				break
+			fi
+		done
+		if [ -z "$got" ]; then
+			echo "warning: the community map repositories don't have $m.map"
+			continue
+		fi
+		entry=$(unzip -Z1 "$TMP/$m.zip" 2>/dev/null | grep -iE "(^|/)$m\.map\$" | head -n 1)
+		if [ -n "$entry" ] && unzip -p "$TMP/$m.zip" "$entry" > "$TMP/$m.map" && [ -s "$TMP/$m.map" ]; then
+			mv "$TMP/$m.map" "maps_ce/$m.map"
+			echo "Installed maps_ce/$m.map from $got"
+		else
+			echo "warning: no $m.map in the archive from $got"
+		fi
+		rm -f "$TMP/$m.zip" "$TMP/$m.map"
+	done
+	for f in bitmaps sounds loc; do
+		[ -f "maps_ce/$f.map" ] || echo "warning: Custom Edition maps need maps_ce/$f.map (upload it from your Custom Edition install)"
+	done
+fi
+
 echo "$TAG ($ARCH)" > .egg-version
 echo "Installed ChupathingyCE server $TAG ($ARCH)."
 [ -f maps/ui.map ] || echo "Next: upload ui.map and the multiplayer maps to maps/ over SFTP."

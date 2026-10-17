@@ -44,6 +44,28 @@ Upload over SFTP:
 
 Or set *Maps archive URL* to a private zip or tar.gz of your own copy.
 
+## Custom Edition maps players can download
+
+A ChupathingyCE player who joins a game on a Custom Edition map they don't
+have is offered it from the community map repository (maps.halonet.net and
+its mirrors), the way Chimera does it. The game server doesn't send the map
+itself. The download only counts if it is the **host's version** of the map,
+so the server has to play the repository's copy.
+
+To host one, for example New Mombasa Classic:
+
+1. Put `new_mombasa_classic` in *Custom Edition maps* (separate several with
+   commas), then reinstall. The installer fetches any that aren't already in
+   `maps_ce/` from the repository.
+2. Upload Custom Edition's `bitmaps.map`, `sounds.map` and `loc.map` to
+   `maps_ce/` if they aren't there yet. Use the x64 or arm64 build.
+3. Add it to a playlist as `<name>@ce`, e.g. `new_mombasa_classic@ce slayer`,
+   or play it now with `sv_map new_mombasa_classic@ce slayer`.
+
+If you upload your own copy of a map instead, players' downloads won't match it
+unless it's byte-for-byte the repository's. OpenCE players don't download maps:
+they need the file in their `custom_maps/`.
+
 ## Resources
 
 At idle it uses about 215 MB of RAM (x64/arm64) or 85 MB (x86), and about 2%
